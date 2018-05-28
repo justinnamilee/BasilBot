@@ -93,11 +93,6 @@
 #define _string_LampStO F(" > Lamp OFF Time SET ")
 #define _string_LampStR F(" > Lamp Cycle Time RESET")
 #define _string_LampStT F(" > Lamp Cycle Time ")
-// not yet implemented
-#define _string_DayTGet F("")
-#define _string_DayTSet F("")
-#define _string_NitTGet F("")
-#define _string_NitTSet F("")
 
 
 ///
