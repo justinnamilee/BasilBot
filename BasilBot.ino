@@ -9,8 +9,8 @@
 //  day, and you think this stuff is worth it, you can buy me a beer in return!
 //
 //   > BasilBot.ino
-//   > 2016-07-08
-//   > Revision 4
+//   > 2018-05-28
+//   > Revision 5
 //
 //   Justin Lee  <justin at taiz dot me>
 //
@@ -70,10 +70,15 @@
 #define _string_Intro   F("Connected to GrowBot v2\n=======================\n")
 #define _string_LampRdy F("Lamp setup complete.")
 #define _string_PumpRdy F("Pump setup complete.")
-#define _string_SysRdy  F("Setup complete.\n\n > System Ready\n > Time ")
+#define _string_SysRdy  F("Setup complete.\n")
+#define _string_SysArm  F(" > System Armed")
 #define _string_CmdRdy  F(" > Waiting for Command...")
 #define _string_CmdStp  F(" > Done")
 #define _string_BadCmd  F(" > Bad Command")
+#define _string_CycDay  F(" > Cycle Day Start ")
+#define _string_CycNght F(" > Cycle Night Start ")
+#define _string_DayChng F(" > Date Changed To ")
+#define _string_CurDate F(" > Date ")
 #define _string_TimeGet F(" > Time ")
 #define _string_TimeSet F(" > Time SET ")
 #define _string_LampON  F(" > Lamp ON")
@@ -90,7 +95,7 @@
 #define _string_LampStT F(" > Lamp Cycle Time ")
 // not yet implemented
 #define _string_DayTGet F("")
-#define _string_DayTSet F("") 
+#define _string_DayTSet F("")
 #define _string_NitTGet F("")
 #define _string_NitTSet F("")
 
@@ -107,7 +112,7 @@ unsigned short clockState; // time of day in minutes only
 unsigned short lampOnTime, lampOffTime, lampStateTime; // for the lamp cycle timer
 unsigned short dayTime, nightTime;
 
-boolean pumpOverride; // ignore the switch or not 
+boolean pumpOverride; // ignore the switch or not
 boolean lampOverride; // ignore the cycle timer
 
 
@@ -126,7 +131,7 @@ void clockCounter()
   // Called by interrupt.  This routine counts seconds (roughly)
   // to keep track of when to get the new time from the RTC.  It
   // also blips the heart beart LED on pin 13.
-  
+
   if (++tick == clockCount)
   {
     tick = 0;
@@ -144,20 +149,26 @@ void clockCounter()
 }
 
 
-void printTime()
+tmElements_t getThyme()
 {
   // Wrapper for routine directly below. Gets the time,
   // then prints it, all in one!
-  
+
   tmElements_t thyme;
   RTC.read(thyme); // get time
-  printTime(thyme); // send to next routine
+
+  return (thyme);
+}
+
+void printTime()
+{
+  printTime(getThyme()); // send to next routine
 }
 
 void printTime(tmElements_t t)
 {
   // Quick routine to print time over serial.
-  
+
   if (t.Hour < 10) Serial.print('0');
   Serial.print(t.Hour);
   Serial.print(':');
@@ -165,12 +176,26 @@ void printTime(tmElements_t t)
   Serial.print(t.Minute);
 }
 
+void printDate ()
+{
+  printDate(getThyme());
+}
+
+void printDate (tmElements_t t)
+{
+  Serial.print(tmYearToCalendar(t.Year));
+  Serial.print('/');
+  Serial.print(t.Month);
+  Serial.print('/');
+  Serial.print(t.Day);
+}
+
 
 byte readSerial(boolean block)
 {
   // Handles reading data from the Serial connection with
   // optional blocking loop.
-  
+
   inByte = 0; // reset the inByte so we don't choke on old data
 
   Serial.flush(); // clear serial buffer
@@ -202,9 +227,9 @@ void updateClock()
 {
   // Every time updateClockState is true this routine
   // will get the current time from the RTC and convert
-  // it to the currently used time-of-day-in-minutes 
+  // it to the currently used time-of-day-in-minutes
   // format.
-  
+
   digitalWrite(heartBeatPin, heartBeatState); // toggle LED ~1 per second
 
   if (updateClockState)
@@ -215,6 +240,15 @@ void updateClock()
     RTC.read(thyme); // get the thyme
 
     clockState = thyme.Minute + (60 * thyme.Hour); // set local clock to time of day in minutes
+
+    if (!clockState)
+    {
+      // at midnight print that the day has changed and output the date
+      printTime(thyme);
+      Serial.print(_string_DayChng);
+      printDate(thyme);
+      Serial.println();
+    }
   }
 }
 
@@ -224,32 +258,34 @@ void updateLamp()
   // Cycle timer.  For now this is a on/off cycle timer, it keeps
   // the lamp on for lampOnTime then off for lampOffTime.  In the
   // future it would be nice to a real alarm system.
-  
+
   if (!lampOverride) // if the override is not enabled
   {
-    if (clockState > dayTime && clockState < nightTime) 
+    if (clockState > dayTime && clockState < nightTime)
     {
       // As long as we are between dayTime and nightTime the
       // lamp will be enabled with the cycle timer running.
       // The cycle timer is used to keep the heat down and
       // prolong the life of the lamp.
-      
+
       if (clockState >= lampStateTime) // and the clock time is >= our change time
       {
         lampStateTime = clockState;
-    
+
         if (digitalRead(lampPin) == ON) // do the thing
         {
           lampStateTime += lampOffTime;
           digitalWrite(lampPin, OFF);
-    
+
+          printTime();
           Serial.println(_string_LampOFF);
         }
         else
         {
           lampStateTime += lampOnTime;
           digitalWrite(lampPin, ON);
-    
+
+          printTime();
           Serial.println(_string_LampON);
         }
       }
@@ -261,7 +297,7 @@ void updateLamp()
       // state.  For day time, we're not sure if the lamp has been
       // forced on or off during this time as the cycle timer does
       // not run at night.
-      
+
       lampStateTime = 0;
       digitalWrite(lampPin, OFF);
     }
@@ -280,11 +316,12 @@ void updatePump()
     if (!pumpDelayByte--) // simple non-blocking delay
     {
       boolean enable = digitalRead(pumpEnablePin); // check current state
-  
+
       if (digitalRead(pumpPin) != enable) // if different change output
       {
         digitalWrite(pumpPin, enable);
-  
+
+        printTime();
         Serial.println(enable ? _string_PumpON : _string_PumpOFF);
       }
     }
@@ -300,6 +337,11 @@ void updateSerial()
   // characters preceeding the first 's' are ignored.  The command
   // list is as follows:
   //
+  //    scduN1.N2 => set the time to be considered Day Time with N1:N2
+  //    scdg      => get the current Day Time
+  //    scnuN1.N2 => set the time to be considered Night Time with N1:N2
+  //    scng      => get the current Night Time
+  //    sdg       => get the current date
   //    stuN1.N2  => set RTC time to N1:N2 (does not affect calendar)
   //    stg       => print the current RTC time to the Serial Console
   //    sli       => turn the lamp on (stays until next lamp state)
@@ -314,23 +356,131 @@ void updateSerial()
   //    spo       => turn the pump off (like previous command)
   //    spbi      => turn on the pump override (pump switch no longer read)
   //    spbo      => turn off the pump override (pump switch read again)
-  //
-  // not yet implemented:
-  //    sduN1.N2  // day stuff
-  //    sdg
-  //    snuN1.N2  // night stuff
-  //    sng
-  
+
   if (readSerial(NONBLOCK) == 's') // start parse loop when we find an 's'
   {
+    printTime();
     Serial.println(_string_CmdRdy);
 
     switchInByte // get a serial byte and parse it
     {
+      // day/night time
+    case 'c':
+      switchInByte
+      {
+        // day
+      case 'd':
+        switchInByte
+        {
+          // update
+        case 'u':
+          unsigned short timeDayMin;
+          timeDayMin = Serial.parseInt() * 60; // hours * min / hour
+          readSerial(BLOCK); // get the spacer character (can be anything)
+          timeDayMin += Serial.parseInt(); // add minutes
+
+          if (timeDayMin < nightTime)
+          {
+            dayTime = timeDayMin;
+          }
+          else
+          {
+            printTime();
+            Serial.println(_string_BadCmd);
+          }
+          break;
+
+          // print
+        case 'g':
+          tmElements_t thyme;
+
+          thyme.Hour = dayTime / 60; // get hours
+          thyme.Minute = dayTime % 60; // get min remaining
+
+          printTime();
+          Serial.print(_string_CycDay);
+          printTime(thyme);
+          Serial.println();
+          break;
+
+        default:
+          printTime();
+          Serial.println(_string_BadCmd);
+          break;
+        }
+        break;
+
+        // night
+      case 'n':
+        switchInByte
+        {
+          // update
+        case 'u':
+          unsigned short timeNightMin;
+          timeNightMin = Serial.parseInt() * 60; // hours * min / hour
+          readSerial(BLOCK); // get the spacer character (can be anything)
+          timeNightMin += Serial.parseInt(); // add minutes
+
+          if (timeNightMin > dayTime)
+          {
+            nightTime = timeNightMin;
+          }
+          else
+          {
+            printTime();
+            Serial.println(_string_BadCmd);
+          }
+          break;
+
+          // print
+        case 'g':
+          tmElements_t thyme;
+
+          thyme.Hour = nightTime / 60; // get hours
+          thyme.Minute = nightTime % 60; // get min remaining
+
+          printTime();
+          Serial.print(_string_CycNght);
+          printTime(thyme);
+          Serial.println();
+          break;
+
+        default:
+          printTime();
+          Serial.println(_string_BadCmd);
+          break;
+        }
+        break;
+
+      default:
+        printTime();
+        Serial.println(_string_BadCmd);
+      }
+      break;
+      //
+      // end of day / night cycle
+
+    case 'd':
+      switchInByte
+      {
+      case 'g':
+        printTime();
+        Serial.print(_string_CurDate);
+        printDate();
+        Serial.println();
+        break;
+
+      default:
+        printTime();
+        Serial.println(_string_BadCmd);
+        break;
+      }
+      break;
+
       // time
     case 't':
       tmElements_t thyme; // used below
-      
+
       switchInByte
       {
         // command: stuN1.N2 -> set time N1:N2 (does not change calendar)
@@ -344,20 +494,23 @@ void updateSerial()
         thyme.Minute = m;
         thyme.Second = 0; // reset second counter
         RTC.write(thyme); // update the clock with new hours/minutes/seconds
-        Serial.print(_string_TimeSet);
         printTime(thyme);
+        Serial.print(_string_TimeSet);
+        printTime(thyme); // SO MUCH TIME
         Serial.println();
         break;
 
         // command: stg -> prints the current time to serial console
       case 'g':
         RTC.read(thyme); // get the thyme
+        printTime(thyme);
         Serial.print(_string_TimeGet);
         printTime(thyme);
         Serial.println();
         break;
 
       default:
+        printTime();
         Serial.println(_string_BadCmd);
         break;
       }
@@ -372,12 +525,14 @@ void updateSerial()
         // command: sli -> turn lamp on (sticks until next state)
       case 'i': // force lamp on
         digitalWrite(lampPin, ON);
+        printTime();
         Serial.println(_string_LampON);
         break;
-        
+
         // command: slo -> turn lamp off (like above)
       case 'o': // force lamp off
         digitalWrite(lampPin, OFF);
+        printTime();
         Serial.println(_string_LampOFF);
         break;
 
@@ -388,16 +543,19 @@ void updateSerial()
         case 'i':
           lampOverride = true;
           lampStateTime = 0; // reset state so next time it runs updateLamp() automatically
+          printTime();
           Serial.println(_string_LampOvE);
           break;
-          
+
           // command: slbo -> lamp obeys cycle timer for state control
         case 'o':
           lampOverride = false;
+          printTime();
           Serial.println(_string_LampOvD);
           break;
-  
+
         default:
+          printTime();
           Serial.println(_string_BadCmd);
           break;
         }
@@ -409,6 +567,7 @@ void updateSerial()
           // command: sltiN1 -> lampOnTime = N1
         case 'i': // set length of time lamp stays on in minutes
           lampOnTime = Serial.parseInt();
+          printTime();
           Serial.print(_string_LampStI);
           Serial.println(lampOnTime);
           break;
@@ -416,6 +575,7 @@ void updateSerial()
           // command: sltoN1 -> lampOffTime = N1
         case 'o': // set length of time lamp stays off in minutes
           lampOffTime = Serial.parseInt();
+          printTime();
           Serial.print(_string_LampStO);
           Serial.println(lampOffTime);
           break;
@@ -423,6 +583,7 @@ void updateSerial()
           // command: slttN1 -> lampStateTime = N1
         case 't': // set the current state counter
           lampStateTime = Serial.parseInt();
+          printTime();
           Serial.print(_string_LampStT);
           Serial.println(lampStateTime);
           break;
@@ -430,16 +591,19 @@ void updateSerial()
           // command: sltr -> lampStateTime = 0
         case 'r': // reset the state counter to zero
           lampStateTime = 0;
+          printTime();
           Serial.println(_string_LampStR);
           break;
 
         default:
+          printTime();
           Serial.println(_string_BadCmd);
           break;
         }
         break;
 
       default:
+        printTime();
         Serial.println(_string_BadCmd);
         break;
       }
@@ -454,12 +618,14 @@ void updateSerial()
         // command: spi -> turn pump on (sticks until pump switch is read again)
       case 'i':
         digitalWrite(pumpPin, ON);
+        printTime();
         Serial.println(_string_PumpON);
         break;
 
         // command: spo -> turn pump off (like above)
       case 'o':
         digitalWrite(pumpPin, OFF);
+        printTime();
         Serial.println(_string_PumpOFF);
         break;
 
@@ -469,22 +635,26 @@ void updateSerial()
           // command: spbi -> pump ignores control switch
         case 'i':
           pumpOverride = true;
+          printTime();
           Serial.println(_string_PumpOvE);
           break;
 
           // command: spbo -> pump obeys control switch
         case 'o':
           pumpOverride = false;
+          printTime();
           Serial.println(_string_PumpOvD);
           break;
-  
+
         default:
+          printTime();
           Serial.println(_string_BadCmd);
           break;
         }
         break;
 
       default:
+        printTime();
         Serial.println(_string_BadCmd);
         break;
       }
@@ -493,10 +663,12 @@ void updateSerial()
       /// end pump
 
     default:
+      printTime();
       Serial.println(_string_BadCmd);
       break;
     }
 
+    printTime();
     Serial.println(_string_CmdStp);  // end of serial parser
   }
 }
@@ -509,7 +681,7 @@ void setupSerial()
 {
   // Hopefully fairly self explanatory.  Starts up the serial
   // communication channel to the computer or LCD or whatever.
-  
+
   Serial.begin(serialSpeed);
 
 #ifdef serialWaitForConsole
@@ -528,7 +700,7 @@ void setupClock()
   // time.  By default it uses a PWM signal from Pin 9 (clockOutPin)
   // connected to Pin 2 (determined by clockInt) to trigger an interrupt
   // routine that drives a counter variable (tick).  The clock interrupt
-  // sets updateClockState to true when the counter reaches its 
+  // sets updateClockState to true when the counter reaches its
   // predetermined stopping point, and the updateClock() routine will
   // get the time from the RTC and update the local time (clockState).
 
@@ -550,7 +722,7 @@ void setupLamp()
   // and off times for the cycle timer, waits a short time then
   // checks to see if the lamp is actually on, then turns the lamp
   // off until setup is complete.
-  
+
   pinMode(lampPin, OUTPUT);
 
   lampOnTime = lampOnTimeDef;
@@ -573,7 +745,7 @@ void setupPump()
   // Sets up the pump and the control pin for use with a
   // grounding switch.  A debounce capacitor should be added
   // in parallel with the switch for best results.
-  
+
   pinMode(pumpPin, OUTPUT);
   pinMode(pumpEnablePin, INPUT_PULLUP); // connect switch to ground
 
@@ -592,15 +764,15 @@ void setupPump()
 void setup()
 {
   // Setup all the peripherals.
-  
+
   setupClock();
   setupSerial();
   setupLamp();
   setupPump();
 
-  Serial.print(_string_SysRdy);
+  Serial.println(_string_SysRdy);
   printTime();
-  Serial.println();
+  Serial.println(_string_SysArm);
 }
 
 
@@ -611,3 +783,4 @@ void loop() // run this code forever
   updatePump(); // check / respond to the pump switch
   updateSerial(); // handle serial events
 }
+
