@@ -146,8 +146,7 @@ void clockCounter()
 
 tmElements_t getThyme()
 {
-  // Wrapper for routine directly below. Gets the time,
-  // then prints it, all in one!
+  // Wrapper for routines directly below.
 
   tmElements_t thyme;
   RTC.read(thyme); // get time
